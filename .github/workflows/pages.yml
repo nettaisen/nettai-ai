@@ -1,0 +1,74 @@
+# The site nettai downloads the practice dummy's network from (https://nettaisen.github.io/nettai-ai/), built from
+# this repository's releases each time one is published. Each release, tagged <line>-r<revision> (0.11-r1), holds one
+# network, nettai-ai.safetensors, for nettai's <line>. The site serves:
+#
+#   index.json                       each line's newest network's SHA-256, by line ({"0.11": "<sha256>"})
+#   weights/<sha256>.safetensors     those networks, named by their SHA-256
+#
+# The networks stay out of git: a release's files are kept by GitHub, and this workflow puts the newest of each line
+# on the site.
+name: Pages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Build the site from the releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p site/weights
+          touch site/.nojekyll
+          gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.draft | not) | .tag_name' > tags.txt
+          python3 - <<'PY'
+          import hashlib, json, re, subprocess, os, pathlib
+          newest = {}
+          for tag in pathlib.Path("tags.txt").read_text().split():
+              m = re.fullmatch(r"(\d+\.\d+)-r(\d+)", tag)
+              if not m:
+                  print(f"skipping release {tag}: not <line>-r<revision>")
+                  continue
+              line, rev = m.group(1), int(m.group(2))
+              if line not in newest or rev > newest[line][1]:
+                  newest[line] = (tag, rev)
+          index = {}
+          for line, (tag, _) in sorted(newest.items()):
+              d = pathlib.Path("download") / tag
+              d.mkdir(parents=True)
+              subprocess.run(["gh", "release", "download", tag, "-R", os.environ["REPO"], "-p", "nettai-ai.safetensors", "-D", str(d)], check=True)
+              data = (d / "nettai-ai.safetensors").read_bytes()
+              sha = hashlib.sha256(data).hexdigest()
+              (pathlib.Path("site/weights") / f"{sha}.safetensors").write_bytes(data)
+              index[line] = sha
+              print(f"{line}: {tag}, {sha}, {len(data):,} bytes")
+          pathlib.Path("site/index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
