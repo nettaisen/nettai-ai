@@ -6,7 +6,8 @@
 #   weights/<sha256>.safetensors     those networks, named by their SHA-256
 #
 # The networks stay out of git: a release's files are kept by GitHub, and this workflow puts the newest of each line
-# on the site.
+# on the site. The site deploys from main alone (the github-pages environment's rule), so a published release starts
+# this workflow again on main, which builds and deploys it.
 name: Pages
 
 on:
@@ -16,15 +17,26 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
+  # A release runs on its tag, which may not deploy: run again on main.
+  on-main:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Run this workflow on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml -R "${{ github.repository }}" --ref main
+
   build:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
       - name: Build the site from the releases
@@ -66,6 +78,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
