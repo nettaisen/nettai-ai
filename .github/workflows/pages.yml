@@ -2,7 +2,8 @@
 # this repository's releases each time one is published. Each release, tagged <line>-r<revision> (0.11-r1), holds one
 # network, nettai-ai.safetensors, for nettai's <line>. The site serves:
 #
-#   index.json                       each line's newest network's SHA-256, by line ({"0.11": "<sha256>"})
+#   index.json                       each line's newest network, by line: its SHA-256 and its full address
+#                                    ({"0.11": {"sha256": "<sha256>", "url": "https://.../weights/<sha256>.safetensors"}})
 #   weights/<sha256>.safetensors     those networks, named by their SHA-256
 #
 # The networks stay out of git: a release's files are kept by GitHub, and this workflow puts the newest of each line
@@ -38,6 +39,9 @@ jobs:
   build:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: read
     steps:
       - name: Build the site from the releases
         env:
@@ -45,6 +49,10 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # The site's own address (its custom domain's, https), which each network's address starts with.
+          BASE=$(gh api "repos/$REPO/pages" --jq .html_url)
+          case "$BASE" in https://*) ;; *) echo "the site's address isn't https: $BASE"; exit 1;; esac
+          export BASE
           mkdir -p site/weights
           touch site/.nojekyll
           gh api --paginate "repos/$REPO/releases" --jq '.[] | select(.draft | not) | .tag_name' > tags.txt
@@ -67,7 +75,7 @@ jobs:
               data = (d / "nettai-ai.safetensors").read_bytes()
               sha = hashlib.sha256(data).hexdigest()
               (pathlib.Path("site/weights") / f"{sha}.safetensors").write_bytes(data)
-              index[line] = sha
+              index[line] = {"sha256": sha, "url": os.environ["BASE"].rstrip("/") + f"/weights/{sha}.safetensors"}
               print(f"{line}: {tag}, {sha}, {len(data):,} bytes")
           pathlib.Path("site/index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
           PY
