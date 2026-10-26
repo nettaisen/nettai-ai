@@ -1,0 +1,35 @@
+# nettai-ai
+
+The trained network that plays the practice dummy's **Fights** in [nettai](https://github.com/nettaisen/nettai).
+nettai downloads it from here, so a better network reaches players without a new release of the app.
+
+## What is here
+
+- `<line>/nettai-ai.safetensors`: the network for a nettai **line**, its major and minor version such as `0.11`
+  (safetensors: the tensors, and what nettai reads to play them, such as the observation spec they were trained on).
+- `index.json`: each line's SHA-256, so nettai can tell whether the copy it keeps is current without downloading
+  the network.
+
+A nettai of version `0.11.x` plays the `0.11` line's network. A new minor version of nettai may change what the
+network sees, so it waits for a network trained for it, published under its own line. The networks of older lines
+stay as they are.
+
+## How nettai uses it
+
+In a build with its `ai` feature, the first time Fights is picked in a run nettai reads `index.json` from this
+repository (`https://raw.githubusercontent.com/nettaisen/nettai-ai/main/index.json`), downloads its line's network
+when the copy it keeps isn't that one (checked by SHA-256), and keeps it in its data folder (`ai/<line>/`). With no
+connection it plays the copy kept. Weights it can't play (trained on another observation spec) are refused.
+
+To try other weights without publishing them, run nettai with `NETTAI_AI_WEIGHTS=<file.safetensors>`.
+
+## Publishing
+
+From nettai's `training/` folder, with this repository checked out beside nettai's:
+
+```
+uv run python -m nettai_ai.publish runs/NAME/checkpoints/ckpt_NNNNNNN.pt --repo ../../nettai-ai [--line 0.11] [--push]
+```
+
+It exports the checkpoint, runs nettai's tests that need trained weights on the file, writes it and its
+`index.json` entry here, and commits (`--push` pushes too). See nettai's `docs/design/training-ai.md` §10.5.
